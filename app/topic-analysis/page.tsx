@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -12,6 +13,7 @@ import type { WechatArticle, AnalysisResult, EnhancedInsight } from "@/lib/types
 import { HistorySidebar } from "@/components/history-sidebar"
 
 export default function TopicAnalysisPage() {
+  const router = useRouter()
   const [keyword, setKeyword] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -51,6 +53,47 @@ export default function TopicAnalysisPage() {
       }
       return newSet
     })
+  }
+
+  // 跳转到内容创作并携带选中洞察
+  const handleStartCreation = () => {
+    if (!analysisResult) {
+      setError("请先完成分析后再开始创作")
+      return
+    }
+
+    // 优先使用增强洞察，其次基础洞察
+    const bestEnhanced = analysisResult.enhancedInsights?.[0] || null
+    const fallback = !bestEnhanced && analysisResult.insights?.[0]
+      ? {
+          title: analysisResult.insights[0].title,
+          description: analysisResult.insights[0].description,
+          category: "洞察",
+          targetAudience: "通用",
+          contentAngle: "",
+          suggestedOutline: [],
+          referenceArticles: [],
+          confidence: 50,
+          reasons: [],
+        }
+      : null
+
+    // 写入 sessionStorage 供内容创作页自动选择
+    try {
+      sessionStorage.setItem(
+        "content-creation-source",
+        JSON.stringify({
+          taskId: currentTaskId ?? null,
+          keyword,
+          insight: bestEnhanced || fallback,
+          insights: analysisResult.enhancedInsights || analysisResult.insights || [],
+        })
+      )
+    } catch (err) {
+      console.error("缓存创作选题失败:", err)
+    }
+
+    router.push("/content-creation")
   }
 
   // 从本地缓存恢复最近一次分析，避免切换标签后内容丢失
@@ -1021,7 +1064,12 @@ export default function TopicAnalysisPage() {
                 }}>
                   重新分析
                 </Button>
-                <Button>基于洞察开始创作</Button>
+              <Button
+                onClick={handleStartCreation}
+                disabled={!analysisResult}
+              >
+                基于洞察开始创作
+              </Button>
               </div>
             )}
           </div>

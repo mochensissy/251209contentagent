@@ -267,7 +267,7 @@ export default function ArticleNewPage() {
       return
     }
 
-    const confirmed = confirm('确定要保存并发布到旁观者手记公众号吗？\n\n流程：保存文章 → AI排版（墨绿色） → 生成封面 → 推送到草稿箱\n预计需要30-60秒')
+    const confirmed = confirm('确定要保存并发布到闻思修AI手记公众号吗？\n\n流程：保存文章 → AI排版（赭黄色，与HR进化派一致） → 生成封面 → 推送到草稿箱\n预计需要30-60秒')
     if (!confirmed) return
 
     setPublishingPGZ(true)
@@ -296,7 +296,7 @@ export default function ArticleNewPage() {
 
       const articleId = saveData.data.id
 
-      // 发布到旁观者手记公众号
+      // 发布到闻思修AI手记公众号
       const publishResponse = await fetch('/api/publish/wechat-pgz', {
         method: 'POST',
         headers: {
@@ -377,7 +377,7 @@ export default function ArticleNewPage() {
             ) : (
               <>
                 <Send className="mr-2 h-4 w-4" />
-                发布到公众号（旁观者手记）
+                发布到公众号（闻思修AI手记）
               </>
             )}
           </Button>

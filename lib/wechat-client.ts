@@ -161,7 +161,7 @@ export class WeChatClient {
     console.log('📝 创建微信公众号草稿...')
 
     const accessToken = await this.getAccessToken()
-    const { title, content, thumbMediaId, author = '旁观者手记' } = params
+    const { title, content, thumbMediaId, author = '闻思修AI手记' } = params
 
     try {
       const response = await fetch(

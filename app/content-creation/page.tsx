@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -45,6 +45,14 @@ export default function ContentCreationPage() {
   const [availableInsights, setAvailableInsights] = useState<EnhancedInsight[]>([])
   const [selectedInsight, setSelectedInsight] = useState<EnhancedInsight | null>(null)
   const [expandedInsights, setExpandedInsights] = useState<Set<number>>(new Set())
+  const [pendingPrefill, setPendingPrefill] = useState<{
+    taskId: number | null
+    insight?: EnhancedInsight | null
+    insights?: EnhancedInsight[]
+  } | null>(null)
+
+  // UI refs
+  const taskSelectRef = useRef<HTMLButtonElement | null>(null)
 
   // 搜索和筛选
   const [searchKeyword, setSearchKeyword] = useState("")
@@ -68,7 +76,31 @@ export default function ContentCreationPage() {
   // 加载分析任务列表
   useEffect(() => {
     loadAnalysisTasks()
+    // 从选题分析页传入的缓存
+    try {
+      const cached = sessionStorage.getItem("content-creation-source")
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        if (parsed.taskId || parsed.insight) {
+          setPendingPrefill({ taskId: parsed.taskId ?? null, insight: parsed.insight, insights: parsed.insights })
+          if (parsed.taskId) {
+            setSelectedTaskId(parsed.taskId)
+          }
+          setSource("insight")
+        }
+      }
+    } catch (err) {
+      console.error("读取创作缓存失败:", err)
+    }
   }, [])
+
+  const handleTabChange = (v: string) => {
+    setSource(v as "insight" | "custom")
+    if (v === "insight") {
+      // 聚焦到任务下拉，提升可见性
+      setTimeout(() => taskSelectRef.current?.focus(), 50)
+    }
+  }
 
   // 加载选中任务的洞察
   useEffect(() => {
@@ -93,16 +125,60 @@ export default function ContentCreationPage() {
     try {
       const response = await fetch(`/api/analysis-tasks/${taskId}`)
       const data = await response.json()
-      if (data.success && data.data.report?.enhancedInsights) {
-        // 按时间倒序排序（最新的在前）
-        const insights = data.data.report.enhancedInsights.sort((a: any, b: any) => {
-          return b.confidence - a.confidence // 也可以按置信度排序
-        })
-        setAvailableInsights(insights)
+      if (data.success && data.data.report) {
+        const report = data.data.report
+
+        // 优先增强洞察，若缺失则从基础洞察转换
+        let insights: EnhancedInsight[] | undefined = report.enhancedInsights
+        if (!insights || insights.length === 0) {
+          insights = (report.insights || []).map((i: any) => ({
+            title: i.title,
+            description: i.description,
+            category: "洞察",
+            targetAudience: "通用",
+            contentAngle: "",
+            suggestedOutline: [],
+            referenceArticles: [],
+            confidence: 50,
+            reasons: [],
+          }))
+        }
+
+        if (insights) {
+          const sorted = insights.sort((a: any, b: any) => b.confidence - a.confidence)
+          setAvailableInsights(sorted)
+
+          // 预填选中的洞察（从选题分析页传入）
+          if (pendingPrefill?.taskId === taskId) {
+            prefillInsight(sorted, pendingPrefill.insight)
+            setPendingPrefill(null)
+          }
+        }
       }
     } catch (error) {
       console.error('加载洞察失败:', error)
     }
+  }
+
+  // 处理无 taskId 场景：直接使用缓存里的洞察列表
+  useEffect(() => {
+    if (pendingPrefill && pendingPrefill.taskId === null && pendingPrefill.insights?.length) {
+      const insights = pendingPrefill.insights
+      setAvailableInsights(insights)
+      prefillInsight(insights, pendingPrefill.insight)
+      setPendingPrefill(null)
+    }
+  }, [pendingPrefill])
+
+  const prefillInsight = (insights: EnhancedInsight[], target?: EnhancedInsight | null) => {
+    if (!insights || insights.length === 0) return
+    if (target) {
+      const match = insights.find((i) => i.title === target.title) || insights[0]
+      setSelectedInsight(match || null)
+    } else {
+      setSelectedInsight(insights[0] || null)
+    }
+    document.getElementById('creation-params')?.scrollIntoView({ behavior: 'smooth' })
   }
 
   // 筛选洞察
@@ -352,7 +428,7 @@ export default function ContentCreationPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs value={source} onValueChange={(v) => setSource(v as "insight" | "custom")}>
+          <Tabs value={source} onValueChange={handleTabChange}>
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="insight">从洞察报告选择</TabsTrigger>
               <TabsTrigger value="custom">自定义输入</TabsTrigger>
@@ -371,7 +447,7 @@ export default function ContentCreationPage() {
                     setCategoryFilter("all")
                   }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger ref={taskSelectRef}>
                     <SelectValue placeholder="请选择一个分析任务..." />
                   </SelectTrigger>
                   <SelectContent className="bg-background">

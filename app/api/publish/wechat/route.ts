@@ -50,7 +50,8 @@ export async function POST(request: NextRequest) {
     // ========== 步骤3: 生成封面图片 ==========
     console.log('\n🖼️  步骤3/5: 生成封面图片...')
 
-    const imageBuffer = await dashScopeClient.generateAndDownload(formattedResult.prompt)
+    const imagePrompt = refinePrompt(article.title, formattedResult.prompt)
+    const imageBuffer = await dashScopeClient.generateAndDownload(imagePrompt)
 
     console.log('✅ 封面图片生成完成')
 
@@ -153,6 +154,26 @@ async function formatArticleForWechatWithRetry(
 
   // 这个理论上不会执行，但为了类型安全
   throw lastError || new Error('AI排版失败')
+}
+
+/**
+ * 优化封面提示词，强制贴合文章主题并避免通用风景图
+ */
+function refinePrompt(title: string, originalPrompt: string): string {
+  const keywords = title
+    .split(/[\s，。,、“”"『』【】\-\s]+/)
+    .filter(Boolean)
+    .slice(0, 6)
+    .join('、')
+
+  return `${originalPrompt}
+
+封面要求（务必遵循）：
+1) 核心主题：封面必须围绕“${title}”，体现与“${keywords || '文章主题'}”直接相关的场景/物件/动作，不能是泛化风景。
+2) 具体元素：优先加入与主题直连的事物（产品/工具/人物行为/职场或业务场景），避免无关建筑与自然风光。
+3) 风格：保持水彩或插画风格，画面简洁专业。
+4) 禁止：纯风景、度假/旅游/山水/公园/海边/城市天际线等无关画面；禁止幼稚卡通。
+5) 色调：现代、清爽、积极，突出主题。`
 }
 
 /**

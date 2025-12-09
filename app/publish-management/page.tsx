@@ -161,14 +161,14 @@ export default function PublishManagementPage() {
     }
   }
 
-  // 发布到公众号（旁观者手记）
+  // 发布到公众号（闻思修AI手记）
   const handlePublishToWechatPGZ = async (articleId: number) => {
     if (publishingId) {
       alert('有文章正在发布中，请稍候...')
       return
     }
 
-    const confirmed = confirm('确定要发布到旁观者手记公众号吗？\n\n流程：AI排版（墨绿色） → 生成封面 → 推送到草稿箱\n预计需要30-60秒')
+    const confirmed = confirm('确定要发布到闻思修AI手记公众号吗？\n\n流程：AI排版（赭黄色，与HR进化派一致） → 生成封面 → 推送到草稿箱\n预计需要30-60秒')
     if (!confirmed) return
 
     setPublishingId(articleId)
@@ -510,7 +510,7 @@ export default function PublishManagementPage() {
                                   ) : (
                                     <>
                                       <Share2 className="mr-2 h-4 w-4" />
-                                      发布到公众号（旁观者手记）
+                                      发布到公众号（闻思修AI手记）
                                     </>
                                   )}
                                 </DropdownMenuItem>

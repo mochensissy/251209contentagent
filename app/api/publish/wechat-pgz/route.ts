@@ -3,11 +3,11 @@ import { prisma } from '@/lib/prisma'
 import { aiClient } from '@/lib/ai-client'
 import { dashScopeClient } from '@/lib/dashscope-client'
 
-// 旁观者手记公众号配置
+// 闻思修AI手记（原旁观者手记）公众号配置
 const PGZ_APPID = process.env.WECHAT_PGZ_APPID || 'wxaa09cc9d8be1432d'
 const PGZ_SECRET = process.env.WECHAT_PGZ_SECRET || '4b09266503d951bc038fdb138395fbdb'
 
-// POST /api/publish/wechat-pgz - 发布文章到旁观者手记公众号
+// POST /api/publish/wechat-pgz - 发布文章到闻思修AI手记公众号
 export async function POST(request: NextRequest) {
   try {
     const { articleId } = await request.json() as { articleId: number }
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    console.log('\n🚀 开始发布文章到旁观者手记公众号...')
+    console.log('\n🚀 开始发布文章到闻思修AI手记公众号...')
     console.log(`- 文章ID: ${articleId}`)
 
     // ========== 步骤1: 获取文章内容 ==========
@@ -39,8 +39,8 @@ export async function POST(request: NextRequest) {
     console.log(`✅ 文章标题: ${article.title}`)
     console.log(`✅ 文章长度: ${article.content.length} 字符`)
 
-    // ========== 步骤2: AI排版处理（旁观者手记风格 - 墨绿色） ==========
-    console.log('\n🎨 步骤2/5: AI排版处理（旁观者手记风格）...')
+    // ========== 步骤2: AI排版处理（闻思修AI手记风格 - 赭黄色，与HR进化派一致） ==========
+    console.log('\n🎨 步骤2/5: AI排版处理（闻思修AI手记风格，与HR进化派一致）...')
 
     const formattedResult = await formatArticleForWechatPGZWithRetry({
       title: article.title,
@@ -53,25 +53,26 @@ export async function POST(request: NextRequest) {
     // ========== 步骤3: 生成封面图片 ==========
     console.log('\n🖼️  步骤3/5: 生成封面图片...')
 
-    const imageBuffer = await dashScopeClient.generateAndDownload(formattedResult.prompt)
+    const imagePrompt = refinePrompt(article.title, formattedResult.prompt)
+    const imageBuffer = await dashScopeClient.generateAndDownload(imagePrompt)
 
     console.log('✅ 封面图片生成完成')
 
-    // ========== 步骤4: 上传封面到微信（旁观者手记） ==========
-    console.log('\n📤 步骤4/5: 上传封面到旁观者手记公众号...')
+    // ========== 步骤4: 上传封面到微信（闻思修AI手记） ==========
+    console.log('\n📤 步骤4/5: 上传封面到闻思修AI手记公众号...')
 
     const thumbMediaId = await uploadThumbToPGZ(imageBuffer)
 
     console.log('✅ 封面上传成功')
 
-    // ========== 步骤5: 创建草稿（旁观者手记） ==========
-    console.log('\n📝 步骤5/5: 创建旁观者手记公众号草稿...')
+    // ========== 步骤5: 创建草稿（闻思修AI手记） ==========
+    console.log('\n📝 步骤5/5: 创建闻思修AI手记公众号草稿...')
 
     const mediaId = await addDraftToPGZ({
       title: formattedResult.title,
       content: formattedResult.html_content,
       thumbMediaId,
-      author: '旁观者手记',
+      author: '闻思修AI手记',
     })
 
     console.log('✅ 草稿创建成功, media_id:', mediaId)
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
       success: true,
       data: {
         mediaId,
-        message: '文章已成功推送到旁观者手记公众号草稿箱',
+        message: '文章已成功推送到闻思修AI手记公众号草稿箱',
       },
     })
 
@@ -114,7 +115,7 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * AI排版处理 - 带重试机制（旁观者手记风格）
+ * AI排版处理 - 带重试机制（闻思修AI手记风格，与HR进化派一致）
  */
 async function formatArticleForWechatPGZWithRetry(
   params: {
@@ -159,7 +160,27 @@ async function formatArticleForWechatPGZWithRetry(
 }
 
 /**
- * AI排版处理 - 旁观者手记风格（墨绿色）
+ * 优化封面提示词，强制贴合文章主题并避免通用风景图
+ */
+function refinePrompt(title: string, originalPrompt: string): string {
+  const keywords = title
+    .split(/[\s，。,、“”"『』【】\-\s]+/)
+    .filter(Boolean)
+    .slice(0, 6)
+    .join('、')
+
+  return `${originalPrompt}
+
+封面要求（务必遵循）：
+1) 核心主题：封面必须围绕“${title}”，体现与“${keywords || '文章主题'}”直接相关的场景/物件/动作，不能是泛化风景。
+2) 具体元素：优先加入与主题直连的事物（产品/工具/人物行为/职场或业务场景），避免无关建筑与自然风光。
+3) 风格：保持水彩或插画风格，画面简洁专业。
+4) 禁止：纯风景、度假/旅游/山水/公园/海边/城市天际线等无关画面；禁止幼稚卡通。
+5) 色调：现代、清爽、积极，突出主题。`
+}
+
+/**
+ * AI排版处理 - 闻思修AI手记风格（赭黄色，与HR进化派一致）
  */
 async function formatArticleForWechatPGZ(params: {
   title: string
@@ -193,20 +214,20 @@ async function formatArticleForWechatPGZ(params: {
 
 2.  **小标题 (H2)**:
     * **小标题前面绝不能出现任何表情符号。**
-    * **【深松石绿】** 小标题的CSS样式必须为:
-    style="font-size: 18px; font-weight: bold; color: #007A6E; text-align: center; margin-top: 45px; margin-bottom: 25px;"
+    * **【赭黄色】** 小标题的CSS样式必须为:
+    style="font-size: 18px; font-weight: bold; color: #C08B40; text-align: center; margin-top: 45px; margin-bottom: 25px;"
 
 3.  **段落 (P)**:
     * **(短段落铁律)** **每个段落严格限制在 1-2 句话。严禁出现任何超过3句话的长段落。**
     * style="margin-bottom: 20px; font-size: 15px;"
 
 4.  **重点强调 (Strong)**:
-    * **【深松石绿】** 必须为 <strong> 标签添加内联样式: style="color: #007A6E; font-weight: 600;"
+    * **【赭黄色】** 必须为 <strong> 标签添加内联样式: style="color: #C08B40; font-weight: 600;"
 
 5.  **引用/要点总结 (Blockquote)**:
     * **【新增样式】** 当需要引用名言或总结要点时，必须使用 <blockquote> 标签。
-    * **【深松石绿】** <blockquote> 的CSS样式必须为:
-    style="border-left: 4px solid #007A6E; background-color: #F8F8F8; padding: 15px 20px; margin: 30px 0; color: #555555; font-style: italic;"
+    * **【赭黄色】** <blockquote> 的CSS样式必须为:
+    style="border-left: 4px solid #C08B40; background-color: #F8F8F8; padding: 15px 20px; margin: 30px 0; color: #555555; font-style: italic;"
 
 ---
 ### 【图像提示词生成指南 - 日系动画电影风格】
@@ -269,14 +290,14 @@ ${content}
 }
 
 /**
- * 简单的Markdown转HTML（降级方案 - 旁观者手记风格）
+ * 简单的Markdown转HTML（降级方案 - 闻思修AI手记风格）
  */
 function markdownToSimpleHtmlPGZ(markdown: string): string {
   let html = markdown
     .replace(/^# (.*$)/gm, '<h1 style="font-size: 24px; font-weight: bold; margin: 20px 0;">$1</h1>')
-    .replace(/^## (.*$)/gm, '<h2 style="font-size: 18px; font-weight: bold; color: #007A6E; text-align: center; margin-top: 45px; margin-bottom: 25px;">$1</h2>')
+    .replace(/^## (.*$)/gm, '<h2 style="font-size: 18px; font-weight: bold; color: #C08B40; text-align: center; margin-top: 45px; margin-bottom: 25px;">$1</h2>')
     .replace(/^### (.*$)/gm, '<h3 style="font-size: 16px; font-weight: bold; margin: 15px 0;">$1</h3>')
-    .replace(/\*\*(.*?)\*\*/g, '<strong style="color: #007A6E; font-weight: 600;">$1</strong>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong style="color: #C08B40; font-weight: 600;">$1</strong>')
     .replace(/\n\n/g, '</p><p style="margin-bottom: 20px; font-size: 15px;">')
     .replace(/^(.+)$/gm, '<p style="margin-bottom: 20px; font-size: 15px;">$1</p>')
 
@@ -284,7 +305,7 @@ function markdownToSimpleHtmlPGZ(markdown: string): string {
 }
 
 /**
- * 获取旁观者手记公众号 Access Token
+ * 获取闻思修AI手记公众号 Access Token
  */
 async function getPGZAccessToken(): Promise<string> {
   const url = `https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${PGZ_APPID}&secret=${PGZ_SECRET}`
@@ -300,7 +321,7 @@ async function getPGZAccessToken(): Promise<string> {
 }
 
 /**
- * 上传封面图片到旁观者手记公众号
+ * 上传封面图片到闻思修AI手记公众号
  */
 async function uploadThumbToPGZ(imageBuffer: Buffer): Promise<string> {
   const accessToken = await getPGZAccessToken()
@@ -327,7 +348,7 @@ async function uploadThumbToPGZ(imageBuffer: Buffer): Promise<string> {
 }
 
 /**
- * 创建草稿到旁观者手记公众号
+ * 创建草稿到闻思修AI手记公众号
  */
 async function addDraftToPGZ(params: {
   title: string
