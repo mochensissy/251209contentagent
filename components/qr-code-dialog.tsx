@@ -32,30 +32,41 @@ export function QRCodeDialog({
 }: QRCodeDialogProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [copied, setCopied] = useState(false)
-  const [useGeneratedQR, setUseGeneratedQR] = useState(false)
+  const [dataUrl, setDataUrl] = useState<string>("")
+  const [genError, setGenError] = useState<string>("")
 
   // 生成二维码
   useEffect(() => {
-    if (open && canvasRef.current && (useGeneratedQR || !qrImageUrl)) {
-      QRCode.toCanvas(
-        canvasRef.current,
-        url,
-        {
-          width: 280,
-          margin: 2,
-          color: {
-            dark: "#000000",
-            light: "#ffffff",
-          },
-        },
-        (error) => {
-          if (error) {
-            console.error("生成二维码失败:", error)
+    if (!open) return
+    setGenError("")
+    setDataUrl("")
+
+    // 尝试生成 dataURL，若失败再用 canvas 占位
+    QRCode.toDataURL(url, {
+      width: 280,
+      margin: 2,
+      color: { dark: "#000000", light: "#ffffff" },
+    })
+      .then((data) => {
+        setDataUrl(data)
+      })
+      .catch((error) => {
+        console.warn("生成二维码 dataURL 失败，将使用占位:", error)
+        setGenError("二维码生成失败，请点击下方链接查看")
+        if (canvasRef.current) {
+          const ctx = canvasRef.current.getContext("2d")
+          if (ctx) {
+            canvasRef.current.width = 280
+            canvasRef.current.height = 280
+            ctx.fillStyle = "#f5f5f5"
+            ctx.fillRect(0, 0, 280, 280)
+            ctx.fillStyle = "#ff4d4f"
+            ctx.font = "16px sans-serif"
+            ctx.fillText("二维码生成失败", 40, 130)
           }
         }
-      )
-    }
-  }, [open, url, qrImageUrl, useGeneratedQR])
+      })
+  }, [open, url])
 
   // 复制链接
   const handleCopy = async () => {
@@ -84,18 +95,21 @@ export function QRCodeDialog({
         <div className="flex flex-col items-center space-y-4 py-4">
           {/* 二维码展示区域 */}
           <div className="bg-white p-4 rounded-lg border-2 border-gray-200">
-            {qrImageUrl && !useGeneratedQR ? (
+            {dataUrl ? (
               <img
-                src={qrImageUrl}
+                src={dataUrl}
                 alt="二维码"
                 className="w-[280px] h-[280px]"
-                onError={() => {
-                  console.error("加载二维码图片失败，使用本地生成")
-                  setUseGeneratedQR(true)
-                }}
+                width={280}
+                height={280}
               />
             ) : (
-              <canvas ref={canvasRef} />
+              <canvas
+                ref={canvasRef}
+                className="w-[280px] h-[280px]"
+                width={280}
+                height={280}
+              />
             )}
           </div>
 
@@ -127,7 +141,7 @@ export function QRCodeDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground text-center">
-              {copied ? "已复制到剪贴板" : "点击按钮复制链接或在新窗口打开"}
+              {genError || (copied ? "已复制到剪贴板" : "点击按钮复制链接或在新窗口打开")}
             </p>
           </div>
         </div>

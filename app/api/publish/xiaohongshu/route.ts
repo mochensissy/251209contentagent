@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { xiaohongshuClient } from '@/lib/xiaohongshu-client'
+import { aiClient } from '@/lib/ai-client'
+import { imageClient } from '@/lib/image-client'
 import { separateTextAndImages, extractTags } from '@/lib/text-utils'
 
 // POST /api/publish/xiaohongshu - 发布文章到小红书
@@ -27,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     // ========== 步骤2: 获取文章内容 ==========
-    console.log('\n📖 步骤1/4: 获取文章内容...')
+    console.log('\n📖 步骤1/5: 获取文章内容...')
 
     const article = await prisma.article.findUnique({
       where: { id: articleId },
@@ -44,7 +46,7 @@ export async function POST(request: NextRequest) {
     console.log(`✅ 文章长度: ${article.content.length} 字符`)
 
     // ========== 步骤3: 图文分离和文本清洗 ==========
-    console.log('\n🔄 步骤2/4: 图文分离和文本清洗...')
+    console.log('\n🔄 步骤2/5: 图文分离和文本清洗...')
 
     // 解析已有的图片
     const existingImages = article.images ? JSON.parse(article.images) : []
@@ -59,26 +61,42 @@ export async function POST(request: NextRequest) {
     console.log(`✅ 提取图片数量: ${images.length}`)
     console.log(`✅ 封面图: ${coverImage || '无'}`)
 
-    // 检查封面图
-    if (!coverImage) {
-      return NextResponse.json(
-        { error: '文章缺少封面图片，无法发布到小红书' },
-        { status: 400 }
-      )
-    }
-
-    // ========== 步骤4: 提取标签 ==========
-    const tags = extractTags(article.title, plainText)
-    console.log(`✅ 提取标签: ${tags.join(', ')}`)
-
-    // ========== 步骤5: 调用小红书 API ==========
-    console.log('\n📤 步骤3/4: 调用小红书发布 API...')
-
-    const publishResult = await xiaohongshuClient.publishNote({
+    // 确保有封面图（无则自动生成）
+    const { finalCoverImage, finalImages } = await ensureCoverImage({
       title: article.title,
       content: plainText,
       coverImage,
-      images: images.slice(1), // 除封面外的其他图片
+      images,
+    })
+
+    // ========== 步骤4: 小红书风格改写 ==========
+    console.log('\n📝 步骤3/5: 小红书风格改写...')
+
+    let xhsContent = plainText
+    try {
+      xhsContent = await rewriteForXiaohongshu({
+        title: article.title,
+        content: plainText,
+        coverImage: finalCoverImage,
+      })
+      console.log(`✅ 改写后文本长度: ${xhsContent.length} 字符`)
+    } catch (rewriteError) {
+      console.error('❌ 小红书风格改写失败，回退到原文:', rewriteError)
+    }
+
+    // ========== 步骤5: 提取标签 ==========
+    console.log('\n🏷️  步骤4/5: 提取标签...')
+    const tags = extractTags(article.title, plainText)
+    console.log(`✅ 提取标签: ${tags.join(', ')}`)
+
+    // ========== 步骤6: 调用小红书 API ==========
+    console.log('\n📤 步骤5/5: 调用小红书发布 API...')
+
+    const publishResult = await xiaohongshuClient.publishNote({
+      title: article.title,
+      content: xhsContent,
+      coverImage: finalCoverImage,
+      images: finalImages.slice(1), // 除封面外的其他图片
       tags,
       noteId: `article_${articleId}_${Date.now()}`, // 自定义笔记ID
     })
@@ -89,8 +107,8 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ 小红书 API 调用成功')
 
-    // ========== 步骤6: 保存发布记录 ==========
-    console.log('\n💾 步骤4/4: 保存发布记录...')
+    // ========== 步骤7: 保存发布记录 ==========
+    console.log('\n💾 保存发布记录...')
 
     await prisma.article.update({
       where: { id: articleId },
@@ -146,4 +164,331 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     )
   }
+}
+
+/**
+ * 使用指定提示词将文章改写为小红书“视觉呼吸”风格
+ */
+async function rewriteForXiaohongshu(params: {
+  title: string
+  content: string
+  coverImage?: string | null
+}): Promise<string> {
+  const { title, content, coverImage } = params
+
+  const prompt = `# Role: 小红书文案改写专家（视觉呼吸版）
+
+## Goals:
+
+将用户输入的文案，改写为极具网感、情绪共鸣强烈、且排版“会呼吸”的小红书爆款笔记。
+
+## Core Style (风格核心):
+1.  **极简主义**：删减废话，只留金句和核心观点。
+2. **“清醒痛点”风**：文风要犀利、扎心，但要拒绝说教味。
+3. **情绪引导**：用“视觉锚点”（Emoji）和短句控制阅读节奏。
+4. **视觉清爽**：段落之间必须留白，避免密集排版。
+
+## Formatting Rules (严格排版规则):
+1.  **标题规范**：
+    - 格式：\`Emoji\` + \`空格\` + \`吸睛标题\`。
+    - 标题风格：必须包含悬念、反直觉或强烈情绪。
+2.  **Emoji 布局策略（关键）**：
+    - **禁止滥用**：正文只在**大段落/新观点开头**放 Emoji，作为分割线；整篇 3-5 个即可，不要每段都放。
+    - **语义匹配**：Emoji 必须与后文内容强相关。示例：成果🍎/💰，成长/起步🌱，思考🤔，扎心/风险💔/⚠️。
+3.  **列表规范**：
+    - 如果有次序感，使用 1️⃣ 2️⃣ 3️⃣ 4️⃣ 作为序号。
+4.  **段落留白**：
+    - “视觉呼吸”排版：每 1-2 句话换行；板块之间空一行。
+5.  **长度**：不超过 500 字；原文不足不强凑。
+
+## Workflow & Constraints:
+1.  静默模式：只输出结果，无额外解释。
+2.  代码块输出：结果必须包裹在 Markdown 代码块中。
+3.  标签生成：文末生成 5-8 个标签，单行显示，空格分隔。
+4.  保留原文关键信息/数据/场景，不编造；不要输出任何图片 URL 或 Markdown 图片占位。
+
+## Initialization:
+请回复：“已配置 V2.0 视觉呼吸模式。请发送您的文案，我将按‘截图同款’风格进行改写。”
+
+## 平台定制：
+- 文章标题：${title}
+- 待改写文案：
+${content}`
+
+  const response = await aiClient.chat([
+    {
+      role: 'system',
+      content: '你是小红书文案改写专家，必须严格遵守提示词中的格式、留白、Emoji与标签规则，输出仅包含改写后的结果。务必使用代码块包裹最终输出，但代码块内不允许出现外部链接或图片URL。',
+    },
+    {
+      role: 'user',
+      content: `${prompt}
+
+待改写文案：
+${content}`,
+    },
+  ], {
+    temperature: 0.35,
+    maxTokens: 1200,
+  })
+
+  const rewritten = extractCodeBlockContent(response)
+  const cleaned = cleanXhsContent(rewritten)
+  const lengthSafe = enforceLengthLimit(cleaned || content, content)
+  const withEmojis = ensureEmojiAnchors(lengthSafe)
+  return withEmojis
+}
+
+/**
+ * 若缺封面则自动生成，并统一维护图片列表顺序（封面在首位）
+ */
+async function ensureCoverImage(params: {
+  title: string
+  content: string
+  coverImage?: string | null
+  images: string[]
+}): Promise<{ finalCoverImage: string; finalImages: string[] }> {
+  const { title, content, coverImage, images } = params
+
+  // 已有封面则直接返回
+  if (coverImage) {
+    return {
+      finalCoverImage: coverImage,
+      finalImages: images.length > 0 ? images : [coverImage],
+    }
+  }
+
+  console.log('⚠️ 未检测到封面，尝试自动生成...')
+
+  // 简单的提示词构建，聚焦主题，避免风景虚图
+  const prompt = buildCoverPrompt(title, content)
+
+  try {
+    const generated = await imageClient.generateImage(prompt)
+    console.log('✅ 自动生成封面成功')
+
+    const finalImages = [generated, ...images]
+    return {
+      finalCoverImage: generated,
+      finalImages,
+    }
+  } catch (error) {
+    console.error('❌ 自动生成封面失败:', error)
+    // 兜底：使用占位图，保证流程不中断
+    const placeholder = 'https://placehold.co/800x450/EEE/555?text=XHS+Cover'
+    console.log('⚠️ 使用占位封面继续流程')
+    const finalImages = [placeholder, ...images]
+    return {
+      finalCoverImage: placeholder,
+      finalImages,
+    }
+  }
+}
+
+function buildCoverPrompt(title: string, content: string): string {
+  const snippet = content.slice(0, 220).replace(/\s+/g, ' ')
+  const shortTitle = toShortTitle(title)
+  const keywords = extractTopWords(`${title} ${content}`, 6).join('、')
+  return `小红书封面海报风，主题必须围绕「${title}」。
+画面元素与主题直接相关，避免无关风景；加入人物/场景动作，突出实用、效率或洞察。
+风格：清爽、现代、插画+扁平，暖色点缀，高对比。
+文字：画面上有中文大字报，内容写成「${shortTitle}」，2-6字，粗体。
+构图：主体居中或黄金分割，大面积留白，符合小红书视觉。
+情绪：积极、有力量、种草感。
+避免：过度写实、英文文字、过暗或杂乱。
+关键要素：${keywords}
+参考文案片段：${snippet}`
+}
+
+/**
+ * 保证生成文案可用且不超过 500 字，优先保留标签行。
+ */
+function enforceLengthLimit(candidate: string, fallback: string): string {
+  const text = candidate.trim()
+  if (!text) return fallback
+
+  const maxLen = 500
+  const lines = text.split('\n')
+  let tagLine = ''
+  let bodyLines = lines
+
+  // 识别末行标签，保留下来避免被截断
+  if (lines.length > 1) {
+    const possibleTagLine = lines[lines.length - 1].trim()
+    const tagTokens = possibleTagLine.split(/\s+/)
+    const looksLikeTags = tagTokens.length >= 3 && tagTokens.some(t => /^#|^＃/.test(t))
+    if (looksLikeTags) {
+      tagLine = possibleTagLine
+      bodyLines = lines.slice(0, -1)
+    }
+  }
+
+  const body = bodyLines.join('\n').trim()
+  if (body.length <= maxLen) {
+    return tagLine ? `${body}\n${tagLine}`.trim() : body
+  }
+
+  const safeSlice = body.slice(0, maxLen)
+  const cutIndex = findBestBreakPoint(safeSlice)
+  const trimmedBody = (cutIndex > 120 ? safeSlice.slice(0, cutIndex).trim() : safeSlice.trim()) || fallback.trim()
+
+  return tagLine ? `${trimmedBody}\n${tagLine}`.trim() : trimmedBody
+}
+
+/**
+ * 选择一个相对自然的截断点，尽量避免截断句子。
+ */
+function findBestBreakPoint(text: string): number {
+  const candidates = [
+    text.lastIndexOf('\n'),
+    text.lastIndexOf('。'),
+    text.lastIndexOf('！'),
+    text.lastIndexOf('？'),
+    text.lastIndexOf('!'),
+    text.lastIndexOf('?'),
+  ]
+  return Math.max(...candidates)
+}
+
+function ensureEmojiAnchors(text: string): string {
+  const blocks = text.split(/\n{2,}/)
+  const emojiPool = ['🚀', '📌', '🌱', '⚡️', '💡', '✅', '🔥', '🎯', '📊', '🧠', '✨']
+  const maxAnchors = 5
+  const minAnchors = 3
+  let used = 0
+
+  // 优先在较长段落（非标题、非序号）添加锚点
+  const enriched = blocks.map((block, idx) => {
+    const trimmed = block.trim()
+    if (!trimmed) return ''
+
+    if (trimmed.length < 40) return trimmed
+
+    const lines = trimmed.split('\n')
+    const firstIdx = lines.findIndex(l => l.trim() !== '')
+    if (firstIdx === -1) return trimmed
+    const first = lines[firstIdx]
+
+    if (first.startsWith('#') || startsWithEmoji(first) || /^[0-9]+\./.test(first.trim())) {
+      return trimmed
+    }
+
+    const shouldAdd = used < minAnchors || (used < maxAnchors && idx % 2 === 0)
+    if (!shouldAdd) return trimmed
+
+    const emoji = emojiPool[used % emojiPool.length]
+    used += 1
+    lines[firstIdx] = `${emoji} ${first.trimStart()}`
+    return lines.join('\n')
+  })
+
+  // 兜底：不足 3 个时，对较短段落补齐（仍跳过标题/已有 emoji）
+  if (used < minAnchors) {
+    for (let i = 0; i < enriched.length && used < minAnchors; i++) {
+      if (!enriched[i]) continue
+      const lines = enriched[i].split('\n')
+      const firstIdx = lines.findIndex(l => l.trim() !== '')
+      if (firstIdx === -1) continue
+      const first = lines[firstIdx]
+      if (startsWithEmoji(first) || first.startsWith('#')) continue
+      const emoji = emojiPool[used % emojiPool.length]
+      used += 1
+      lines[firstIdx] = `${emoji} ${lines[firstIdx].trimStart()}`
+      enriched[i] = lines.join('\n')
+    }
+  }
+
+  return enriched.join('\n\n')
+}
+
+function startsWithEmoji(line: string): boolean {
+  const trimmed = line.trimStart()
+  if (!trimmed) return false
+  const firstChar = Array.from(trimmed)[0]
+  // Unicode 扩展图形符号检测
+  return /\p{Extended_Pictographic}/u.test(firstChar)
+}
+
+function extractTopWords(text: string, count: number): string[] {
+  const words = text
+    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+  const freq: Record<string, number> = {}
+  words.forEach(w => {
+    const k = w.toLowerCase()
+    freq[k] = (freq[k] || 0) + 1
+  })
+  return Object.entries(freq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, count)
+    .map(([w]) => w)
+}
+
+/**
+ * 提取代码块内的正文，若不存在代码块则返回原文
+ */
+function extractCodeBlockContent(text: string): string {
+  const match = text.match(/```[\w-]*\n?([\s\S]*?)```/)
+  return (match ? match[1] : text).trim()
+}
+
+/**
+ * 清理小红书正文：去掉代码块、图片、URL，避免乱码
+ */
+function cleanXhsContent(text: string): string {
+  let result = text
+  // 保留代码块内文本，去掉代码块标记
+  result = result.replace(/```[\w-]*\n?/g, '')
+  result = result.replace(/```/g, '')
+  // 移除图片 Markdown
+  result = result.replace(/!\[.*?\]\(.*?\)/g, '')
+  // 移除裸露URL
+  result = result.replace(/https?:\/\/\S+/g, '')
+  result = tightenBreathing(result)
+  return result
+}
+
+function toShortTitle(title: string): string {
+  const cleaned = title.replace(/[，。.!？?]/g, ' ').trim()
+  return cleaned.slice(0, 8) || '热点好物'
+}
+
+/**
+ * 收紧留白：只在较长段落或明显分段处保留空行，避免每行后都多一行
+ */
+function tightenBreathing(text: string): string {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const cleaned: string[] = []
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd()
+    if (line.trim() === '') {
+      // 查看前后非空行长度，短行之间不保留空行
+      const prev = findPrevNonEmpty(cleaned)
+      const next = findNextNonEmpty(lines, i + 1)
+      const shouldKeep = (prev?.length ?? 0) >= 30 || (next?.length ?? 0) >= 30
+      if (shouldKeep && cleaned[cleaned.length - 1] !== '') {
+        cleaned.push('')
+      }
+      continue
+    }
+    cleaned.push(line)
+  }
+
+  return cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function findPrevNonEmpty(arr: string[]): string | null {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].trim() !== '') return arr[i]
+  }
+  return null
+}
+
+function findNextNonEmpty(arr: string[], start: number): string | null {
+  for (let i = start; i < arr.length; i++) {
+    if (arr[i].trim() !== '') return arr[i]
+  }
+  return null
 }

@@ -208,7 +208,7 @@ export default function PublishManagementPage() {
       return
     }
 
-    const confirmed = confirm('确定要发布到小红书吗？\n\n流程：图文分离 → 文本清洗 → 调用发布API\n预计需要10-20秒')
+    const confirmed = confirm('确定要发布到小红书吗？\n\n流程：图文分离 → 小红书风格改写 → 图片置顶 → 调用发布API\n预计需要10-20秒')
     if (!confirmed) return
 
     setPublishingId(articleId)
