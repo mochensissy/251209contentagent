@@ -137,6 +137,39 @@ export function extractTags(title: string, content: string): string[] {
 }
 
 /**
+ * 将末行疑似标签的分隔符统一为空格并拆分为候选标签
+ * - 支持空格 / 逗号 / 顿号 / 竖线分隔
+ * - 去掉开头的 #，过滤过短或包含句号的内容
+ */
+function parseBareTags(line: string): string[] {
+  return line
+    .replace(/[|｜]/g, ' ')
+    .split(/[\s,，、]+/)
+    .map(token => token.trim().replace(/^[#＃]+/, ''))
+    .filter(token => token.length >= 2 && token.length <= 30)
+    // 避免把完整句子误判为标签
+    .filter(token => !/[。！？!？；;：:,，]/.test(token))
+}
+
+/**
+ * 判断末行是否像“无 # 的标签行”，并返回拆分后的标签
+ * 规则：无明显句末标点，标签数≥3
+ */
+function extractTrailingBareTags(text: string): string[] {
+  const lines = text.trimEnd().split('\n')
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop()
+  }
+  if (lines.length === 0) return []
+
+  const lastLine = lines[lines.length - 1].trim()
+  if (/[。！？!？；;：:]$/.test(lastLine)) return []
+
+  const tokens = parseBareTags(lastLine)
+  return tokens.length >= 3 ? tokens : []
+}
+
+/**
  * 规范化话题并确保正文末尾存在带 # 的话题行
  */
 export function ensureTopicHashtags(params: {
@@ -177,6 +210,10 @@ export function ensureTopicHashtags(params: {
     }
   })
 
+  // 4) 末行疑似标签（未带 #）的兜底补全
+  const trailingBareTags = extractTrailingBareTags(content)
+  trailingBareTags.forEach(addTopic)
+
   const topics = orderedTopics.slice(0, maxTopics)
   if (topics.length === 0) {
     return { contentWithHashtags: content.trim(), topics }
@@ -189,7 +226,9 @@ export function ensureTopicHashtags(params: {
   }
   if (lines.length > 0) {
     const lastLine = lines[lines.length - 1].trim()
-    const looksLikeTagLine = /^([#＃][\p{Script=Han}A-Za-z0-9_\-]+(\s+|$))+$/u.test(lastLine)
+    const looksLikeTagLine =
+      /^([#＃][\p{Script=Han}A-Za-z0-9_\-]+(\s+|$))+$/u.test(lastLine) ||
+      extractTrailingBareTags(lastLine).length >= 3
     if (looksLikeTagLine) {
       lines.pop()
     }

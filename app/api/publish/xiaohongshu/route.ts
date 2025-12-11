@@ -129,11 +129,50 @@ export async function POST(request: NextRequest) {
     xhsContent = enforceLengthLimit(contentWithHashtags, xhsContent)
     tags = topics
 
-    console.log(`✅ 话题补全: ${tags.join(', ')}`)
-    console.log(`🧾 发布正文预览（前200字）: ${xhsContent.slice(0, 200)}...`)
-    console.log(`🧾 发布正文预览（尾200字）: ${
-      xhsContent.length > 200 ? xhsContent.slice(-200) : xhsContent
-    }`)
+    console.log(`✅ 话题补全完成`)
+    console.log(`  - 话题数量: ${tags.length}`)
+    console.log(`  - 话题列表: ${tags.join(', ')}`)
+    console.log(`  - 正文总长度: ${xhsContent.length} 字符`)
+    console.log(`🧾 发布正文预览（前200字）:`)
+    console.log(xhsContent.slice(0, 200))
+    console.log(`🧾 发布正文预览（尾200字）:`)
+    console.log(xhsContent.length > 200 ? xhsContent.slice(-200) : xhsContent)
+    
+    // 检查标签行是否存在，如果没有则强制添加
+    const hasTagsInContent = tags.some(tag => xhsContent.includes(`#${tag}`))
+    if (!hasTagsInContent && tags.length > 0) {
+      console.warn('⚠️ 警告：正文中未检测到话题标签，正在强制添加...')
+      const tagLine = tags.map(t => `#${t}`).join(' ')
+      xhsContent = `${xhsContent.trim()}\n\n${tagLine}`
+      console.log(`✅ 已强制添加标签行: ${tagLine}`)
+    }
+
+    // 最终字数检查：小红书限制约 1000 字，这里保守设置 900
+    const XHS_MAX_LENGTH = 900
+    if (xhsContent.length > XHS_MAX_LENGTH) {
+      console.warn(`⚠️ 内容超过小红书字数限制 (${xhsContent.length}/${XHS_MAX_LENGTH})，正在截断...`)
+      // 优先保留标签行
+      const lines = xhsContent.split('\n')
+      const tagLineIdx = lines.findIndex(l => l.trim().split(/\s+/).filter(t => /^#/.test(t)).length >= 3)
+      let tagLine = ''
+      if (tagLineIdx >= 0) {
+        tagLine = lines[tagLineIdx]
+        lines.splice(tagLineIdx, 1)
+      }
+      // 截断正文
+      let body = lines.join('\n').trim()
+      const availableLen = XHS_MAX_LENGTH - (tagLine ? tagLine.length + 2 : 0)
+      if (body.length > availableLen) {
+        body = body.slice(0, availableLen)
+        // 找最后一个句号/感叹号/问号截断
+        const lastPunct = Math.max(body.lastIndexOf('。'), body.lastIndexOf('！'), body.lastIndexOf('？'))
+        if (lastPunct > availableLen * 0.7) {
+          body = body.slice(0, lastPunct + 1)
+        }
+      }
+      xhsContent = tagLine ? `${body.trim()}\n\n${tagLine}` : body.trim()
+      console.log(`✅ 截断后长度: ${xhsContent.length} 字符`)
+    }
 
     // ========== 步骤6: 调用小红书 API ==========
     console.log('\n📤 步骤5/5: 调用小红书发布 API...')
@@ -227,7 +266,10 @@ async function rewriteForXiaohongshu(params: {
 ## Goals:
 
 将用户输入的文案，改写为极具网感、情绪共鸣强烈、且排版“会呼吸”的小红书爆款笔记。
-保持原文信息完整，不得删减关键段落；如需精简仅限改写啰嗦句式，禁止截断内容。
+⚠️ 【最重要】字数硬限制：小红书笔记有字数上限，正文+标签必须控制在 800 字以内！
+- 长文必须大幅精简，只保留核心观点和金句
+- 删除次要段落、重复内容、过度展开的细节
+- 宁可少写，也绝不能超过 800 字
 
 ## Core Style (风格核心):
 1.  **极简主义**：删减废话，只留金句和核心观点。
@@ -246,14 +288,18 @@ async function rewriteForXiaohongshu(params: {
     - 如果有次序感，使用 1️⃣ 2️⃣ 3️⃣ 4️⃣ 作为序号。
 4.  **段落留白**：
     - “视觉呼吸”排版：每 1-2 句话换行；板块之间空一行。
-5.  **长度**：不硬性限长，保持原文信息量；仅在极端冗余时可适度收紧，但不得删段或截断。
-6.  **Emoji 数量**：全篇确保 3-6 个 Emoji，放在关键段落首行。
+5.  **⚠️ 字数限制（最重要）**：
+    - **正文 + 标签行总计不超过 800 字！**
+    - 这是小红书平台的硬性限制，超过会被截断
+    - 长文要大幅精简，提炼 2-3 个核心观点即可
+6.  **Emoji 数量**：全篇确保 3-5 个 Emoji，放在关键段落首行。
 
 ## Workflow & Constraints:
 1.  静默模式：只输出结果，无额外解释。
 2.  代码块输出：结果必须包裹在 Markdown 代码块中。
-3.  标签生成：文末生成 5-8 个标签，单行显示，空格分隔。
+3.  **标签生成（必须）**：文末**必须**生成 5-8 个标签，单行显示，空格分隔，格式为 #标签1 #标签2 #标签3 ...。标签行不能省略或被截断。
 4.  保留原文关键信息/数据/场景，不编造；不要输出任何图片 URL 或 Markdown 图片占位。
+5.  **完整性 > 信息量**：宁可删减内容，也要保证正文有完整结尾 + 标签行。绝对不能超过 800 字！
 
 ## Initialization:
 请回复：“已配置 V2.0 视觉呼吸模式。请发送您的文案，我将按‘截图同款’风格进行改写。”
@@ -266,7 +312,7 @@ ${content}`
   const response = await aiClient.chat([
     {
       role: 'system',
-      content: '你是小红书文案改写专家，必须严格遵守提示词中的格式、留白、Emoji与标签规则，输出仅包含改写后的结果。务必使用代码块包裹最终输出，但代码块内不允许出现外部链接或图片URL。',
+      content: '你是小红书文案改写专家。【最重要规则】输出必须控制在800字以内（含标签），因为小红书有字数限制，超过会被截断！长文要大幅精简，只保留核心观点。务必包含完整结尾和标签行。使用代码块包裹输出。',
     },
     {
       role: 'user',
@@ -277,7 +323,7 @@ ${content}`,
     },
   ], {
     temperature: 0.35,
-    maxTokens: 1200,
+    maxTokens: 1500,
   })
 
   const rewritten = extractCodeBlockContent(response)
@@ -355,7 +401,8 @@ function enforceLengthLimit(candidate: string, fallback: string): string {
   const text = candidate.trim()
   if (!text) return fallback
 
-  const maxLen = 12000
+  // 小红书笔记字数限制约为 1000 字，这里保守设置为 900
+  const maxLen = 900
   const lines = text.split('\n')
   let tagLine = ''
   let bodyLines = lines
@@ -364,10 +411,13 @@ function enforceLengthLimit(candidate: string, fallback: string): string {
   if (lines.length > 1) {
     const possibleTagLine = lines[lines.length - 1].trim()
     const tagTokens = possibleTagLine.split(/\s+/)
-    const looksLikeTags = tagTokens.length >= 3 && tagTokens.some(t => /^#|^＃/.test(t))
+    // 更宽松的标签识别：至少 2 个 token，且至少一半以 # 开头
+    const hashtagCount = tagTokens.filter(t => /^#|^＃/.test(t)).length
+    const looksLikeTags = tagTokens.length >= 2 && hashtagCount >= Math.ceil(tagTokens.length / 2)
     if (looksLikeTags) {
       tagLine = possibleTagLine
       bodyLines = lines.slice(0, -1)
+      console.log(`🏷️  识别到标签行，将优先保留: ${tagLine}`)
     }
   }
 
