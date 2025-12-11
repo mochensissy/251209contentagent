@@ -135,3 +135,92 @@ export function extractTags(title: string, content: string): string[] {
   // 去重并限制数量
   return Array.from(new Set(tags)).slice(0, 5)
 }
+
+/**
+ * 规范化话题并确保正文末尾存在带 # 的话题行
+ */
+export function ensureTopicHashtags(params: {
+  content: string
+  explicitTopics?: string[]
+  keywordSeeds?: string[]
+  maxTopics?: number
+}): { contentWithHashtags: string; topics: string[] } {
+  const { content, explicitTopics = [], keywordSeeds = [], maxTopics = 12 } = params
+
+  const orderedTopics: string[] = []
+  const seen = new Set<string>()
+
+  const addTopic = (raw: string | undefined | null) => {
+    if (!raw) return
+    const normalized = raw.trim().replace(/^[#＃]+/, '')
+    if (!normalized) return
+    if (seen.has(normalized)) return
+    seen.add(normalized)
+    orderedTopics.push(normalized)
+  }
+
+  // 1) 已有 #话题
+  const existing = Array.from(content.matchAll(/[#＃]([\p{Script=Han}A-Za-z0-9_\-]{2,30})/gu)).map(
+    match => match[1],
+  )
+  existing.forEach(addTopic)
+
+  // 2) 显式传入的话题
+  explicitTopics.forEach(addTopic)
+
+  // 3) 文本中出现的关键词种子
+  const haystack = content
+  keywordSeeds.forEach(seed => {
+    if (!seed) return
+    if (haystack.includes(seed)) {
+      addTopic(seed)
+    }
+  })
+
+  const topics = orderedTopics.slice(0, maxTopics)
+  if (topics.length === 0) {
+    return { contentWithHashtags: content.trim(), topics }
+  }
+
+  // 移除末尾已存在的纯标签行，避免重复
+  const lines = content.trimEnd().split('\n')
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop()
+  }
+  if (lines.length > 0) {
+    const lastLine = lines[lines.length - 1].trim()
+    const looksLikeTagLine = /^([#＃][\p{Script=Han}A-Za-z0-9_\-]+(\s+|$))+$/u.test(lastLine)
+    if (looksLikeTagLine) {
+      lines.pop()
+    }
+  }
+
+  const topicLine = topics.map(t => `#${t}`).join(' ')
+  const body = lines.join('\n').trim()
+  const contentWithHashtags = body ? `${body}\n\n${topicLine}` : topicLine
+
+  return { contentWithHashtags, topics }
+}
+
+/**
+ * 检测正文是否可能被截断或未收尾
+ */
+export function detectIncompleteContent(text: string, minLength = 120): string | null {
+  const trimmed = text.trim()
+  if (trimmed.length < minLength) {
+    return '正文过短，可能未写完'
+  }
+
+  const lines = trimmed.split('\n').map(l => l.trim()).filter(Boolean)
+  if (lines.length === 0) {
+    return '正文为空，可能未写完'
+  }
+
+  const lastLine = lines[lines.length - 1]
+  const goodEnding = /[。！!？?…]$/.test(lastLine)
+  if (!goodEnding) {
+    return '正文结尾缺少收尾标点，可能被截断'
+  }
+
+  return null
+}

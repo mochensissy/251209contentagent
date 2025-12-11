@@ -3,7 +3,12 @@ import { prisma } from '@/lib/prisma'
 import { xiaohongshuClient } from '@/lib/xiaohongshu-client'
 import { aiClient } from '@/lib/ai-client'
 import { imageClient } from '@/lib/image-client'
-import { separateTextAndImages, extractTags } from '@/lib/text-utils'
+import {
+  separateTextAndImages,
+  extractTags,
+  ensureTopicHashtags,
+  detectIncompleteContent,
+} from '@/lib/text-utils'
 
 // POST /api/publish/xiaohongshu - 发布文章到小红书
 export async function POST(request: NextRequest) {
@@ -61,6 +66,15 @@ export async function POST(request: NextRequest) {
     console.log(`✅ 提取图片数量: ${images.length}`)
     console.log(`✅ 封面图: ${coverImage || '无'}`)
 
+    // 基础完整性校验，避免“半截内容”发布
+    const completenessIssue = detectIncompleteContent(plainText)
+    if (completenessIssue) {
+      return NextResponse.json(
+        { error: `发布中止：${completenessIssue}` },
+        { status: 400 },
+      )
+    }
+
     // 确保有封面图（无则自动生成）
     const { finalCoverImage, finalImages } = await ensureCoverImage({
       title: article.title,
@@ -86,8 +100,40 @@ export async function POST(request: NextRequest) {
 
     // ========== 步骤5: 提取标签 ==========
     console.log('\n🏷️  步骤4/5: 提取标签...')
-    const tags = extractTags(article.title, plainText)
+    let tags = extractTags(article.title, plainText)
     console.log(`✅ 提取标签: ${tags.join(', ')}`)
+
+    // ========== 步骤5.1: 话题补全为 # 格式 + 去重 ==========
+    const keywordSeeds = [
+      '复盘',
+      '认知升级',
+      '信息焦虑',
+      'AI',
+      '知识管理',
+      '方法论',
+      '自我成长',
+      '年末总结',
+      '月度总结',
+      '长文',
+      '话题',
+    ]
+
+    const { contentWithHashtags, topics } = ensureTopicHashtags({
+      content: xhsContent,
+      explicitTopics: tags,
+      keywordSeeds,
+      maxTopics: 12,
+    })
+
+    // 控制长度，优先保留话题行
+    xhsContent = enforceLengthLimit(contentWithHashtags, xhsContent)
+    tags = topics
+
+    console.log(`✅ 话题补全: ${tags.join(', ')}`)
+    console.log(`🧾 发布正文预览（前200字）: ${xhsContent.slice(0, 200)}...`)
+    console.log(`🧾 发布正文预览（尾200字）: ${
+      xhsContent.length > 200 ? xhsContent.slice(-200) : xhsContent
+    }`)
 
     // ========== 步骤6: 调用小红书 API ==========
     console.log('\n📤 步骤5/5: 调用小红书发布 API...')
@@ -181,6 +227,7 @@ async function rewriteForXiaohongshu(params: {
 ## Goals:
 
 将用户输入的文案，改写为极具网感、情绪共鸣强烈、且排版“会呼吸”的小红书爆款笔记。
+保持原文信息完整，不得删减关键段落；如需精简仅限改写啰嗦句式，禁止截断内容。
 
 ## Core Style (风格核心):
 1.  **极简主义**：删减废话，只留金句和核心观点。
@@ -199,7 +246,8 @@ async function rewriteForXiaohongshu(params: {
     - 如果有次序感，使用 1️⃣ 2️⃣ 3️⃣ 4️⃣ 作为序号。
 4.  **段落留白**：
     - “视觉呼吸”排版：每 1-2 句话换行；板块之间空一行。
-5.  **长度**：不超过 500 字；原文不足不强凑。
+5.  **长度**：不硬性限长，保持原文信息量；仅在极端冗余时可适度收紧，但不得删段或截断。
+6.  **Emoji 数量**：全篇确保 3-6 个 Emoji，放在关键段落首行。
 
 ## Workflow & Constraints:
 1.  静默模式：只输出结果，无额外解释。
@@ -301,13 +349,13 @@ function buildCoverPrompt(title: string, content: string): string {
 }
 
 /**
- * 保证生成文案可用且不超过 500 字，优先保留标签行。
+ * 保证生成文案可用且不过度截断，默认 12000 字内收敛，优先保留标签行。
  */
 function enforceLengthLimit(candidate: string, fallback: string): string {
   const text = candidate.trim()
   if (!text) return fallback
 
-  const maxLen = 500
+  const maxLen = 12000
   const lines = text.split('\n')
   let tagLine = ''
   let bodyLines = lines
