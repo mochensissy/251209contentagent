@@ -147,8 +147,8 @@ export async function POST(request: NextRequest) {
       console.log(`✅ 已强制添加标签行: ${tagLine}`)
     }
 
-    // 最终字数检查：小红书限制约 1000 字，这里保守设置 900
-    const XHS_MAX_LENGTH = 900
+    // 最终字数检查：小红书限制约 800 字，这里与平台对齐
+    const XHS_MAX_LENGTH = 800
     if (xhsContent.length > XHS_MAX_LENGTH) {
       console.warn(`⚠️ 内容超过小红书字数限制 (${xhsContent.length}/${XHS_MAX_LENGTH})，正在截断...`)
       // 优先保留标签行
@@ -267,6 +267,7 @@ async function rewriteForXiaohongshu(params: {
 
 将用户输入的文案，改写为极具网感、情绪共鸣强烈、且排版“会呼吸”的小红书爆款笔记。
 ⚠️ 【最重要】字数硬限制：小红书笔记有字数上限，正文+标签必须控制在 800 字以内！
+- 如果原文超过 800 字，必须缩减到 800 字以内（含标签），主旨不变，可删次要细节
 - 长文必须大幅精简，只保留核心观点和金句
 - 删除次要段落、重复内容、过度展开的细节
 - 宁可少写，也绝不能超过 800 字
@@ -401,8 +402,8 @@ function enforceLengthLimit(candidate: string, fallback: string): string {
   const text = candidate.trim()
   if (!text) return fallback
 
-  // 小红书笔记字数限制约为 1000 字，这里保守设置为 900
-  const maxLen = 900
+  // 小红书笔记字数限制约为 800 字，这里与平台对齐
+  const maxLen = 800
   const lines = text.split('\n')
   let tagLine = ''
   let bodyLines = lines
