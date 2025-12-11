@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -83,6 +84,13 @@ export default function PublishManagementPage() {
   const [loading, setLoading] = useState(true)
   const [publishingId, setPublishingId] = useState<number | null>(null)
   const [publishingPlatform, setPublishingPlatform] = useState<string | null>(null)
+
+  // 推特文案改写
+  const [twitterDialogOpen, setTwitterDialogOpen] = useState(false)
+  const [twitterContent, setTwitterContent] = useState("")
+  const [twitterLoading, setTwitterLoading] = useState(false)
+  const [twitterArticle, setTwitterArticle] = useState<Article | null>(null)
+  const [twitterError, setTwitterError] = useState<string | null>(null)
 
   // 二维码弹窗状态
   const [qrDialogOpen, setQrDialogOpen] = useState(false)
@@ -319,6 +327,58 @@ export default function PublishManagementPage() {
     }
   }
 
+  // 改写为推特文案
+  const handleRewriteTwitter = async (article: Article) => {
+    setTwitterArticle(article)
+    setTwitterDialogOpen(true)
+    setTwitterLoading(true)
+    setTwitterError(null)
+
+    try {
+      const response = await fetch(`/api/articles/${article.id}/rewrite-twitter`, {
+        method: 'POST',
+      })
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setTwitterContent(data.data.tweet)
+      } else {
+        setTwitterError(data.error || '改写失败，请稍后重试')
+      }
+    } catch (error) {
+      console.error('改写推特文案失败:', error)
+      setTwitterError(error instanceof Error ? error.message : '改写失败，请稍后重试')
+    } finally {
+      setTwitterLoading(false)
+    }
+  }
+
+  // 重写（再次调用）
+  const handleRetryTwitter = () => {
+    if (!twitterArticle) return
+    void handleRewriteTwitter(twitterArticle)
+  }
+
+  // 复制推特文案
+  const handleCopyTwitter = async () => {
+    if (!twitterContent) return
+    try {
+      await navigator.clipboard.writeText(twitterContent)
+      alert('已复制到剪贴板')
+    } catch (error) {
+      console.error('复制失败:', error)
+      alert('复制失败，请手动复制')
+    }
+  }
+
+  // 关闭弹窗时重置错误/加载状态
+  useEffect(() => {
+    if (!twitterDialogOpen) {
+      setTwitterError(null)
+      setTwitterLoading(false)
+    }
+  }, [twitterDialogOpen])
+
   // 打开状态修改对话框
   const handleOpenStatusDialog = (article: Article) => {
     setEditingArticle(article)
@@ -534,6 +594,23 @@ export default function PublishManagementPage() {
                               </>
                             )}
                             <DropdownMenuItem
+                              className="text-blue-600"
+                              onClick={() => handleRewriteTwitter(article)}
+                              disabled={twitterLoading}
+                            >
+                              {twitterLoading && twitterArticle?.id === article.id ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  改写中...
+                                </>
+                              ) : (
+                                <>
+                                  <Share2 className="mr-2 h-4 w-4" />
+                                  改写成推特文案
+                                </>
+                              )}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
                               className="text-destructive"
                               onClick={() => handleDelete(article.id)}
                             >
@@ -607,6 +684,70 @@ export default function PublishManagementPage() {
         open={previewOpen}
         onOpenChange={setPreviewOpen}
       />
+
+      {/* 推特文案预览 */}
+      <Dialog open={twitterDialogOpen} onOpenChange={setTwitterDialogOpen}>
+        <DialogContent className="sm:max-w-[540px]">
+          <DialogHeader>
+            <DialogTitle>推特文案预览</DialogTitle>
+            <DialogDescription>
+              {twitterArticle ? `基于文章《${twitterArticle.title}》` : '改写后的推特文案'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {twitterLoading && (
+              <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                正在改写，请稍候...
+              </div>
+            )}
+            {twitterError && !twitterLoading && (
+              <div className="text-destructive text-sm">
+                {twitterError}
+              </div>
+            )}
+            {!twitterLoading && !twitterError && (
+              <Textarea
+                value={twitterContent}
+                readOnly
+                className="min-h-[180px] resize-none"
+              />
+            )}
+            <div className="text-xs text-muted-foreground">
+              单条推文需控制在 140 字内，可多次重写直到满意
+            </div>
+          </div>
+          <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div />
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={handleRetryTwitter}
+                disabled={twitterLoading || !twitterArticle}
+              >
+                {twitterLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    重写中...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    重写
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={handleCopyTwitter}
+                disabled={!twitterContent || twitterLoading}
+              >
+                <Copy className="mr-2 h-4 w-4" />
+                复制
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* 状态修改弹窗 */}
       <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
