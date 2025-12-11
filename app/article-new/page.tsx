@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useRef, useEffect } from "react"
+import { useState, useMemo, useRef, useEffect, type KeyboardEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -121,6 +121,91 @@ export default function ArticleNewPage() {
   const [summary, setSummary] = useState("")
   const [status, setStatus] = useState<ArticleStatus>("draft")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const historyRef = useRef<string[]>([""])
+  const historyIndexRef = useRef(0)
+
+  /**
+   * 初始化或重置内容历史栈，确保撤销起点正确。
+   */
+  const resetHistory = (initialValue: string) => {
+    historyRef.current = [initialValue]
+    historyIndexRef.current = 0
+  }
+
+  /**
+   * 记录内容变更，支持 Cmd+Z / Cmd+Shift+Z 撤销重做。
+   */
+  const pushHistory = (nextValue: string) => {
+    const history = historyRef.current
+    const currentIndex = historyIndexRef.current
+
+    if (history[currentIndex] === nextValue) return
+
+    const nextHistory = history.slice(0, currentIndex + 1)
+    nextHistory.push(nextValue)
+
+    // 控制栈大小，防止无限增长
+    const MAX_HISTORY = 200
+    if (nextHistory.length > MAX_HISTORY) {
+      nextHistory.shift()
+    }
+
+    historyRef.current = nextHistory
+    historyIndexRef.current = nextHistory.length - 1
+  }
+
+  /**
+   * 处理内容输入并写入历史。
+   */
+  const handleContentChange = (value: string) => {
+    setContent(value)
+    pushHistory(value)
+  }
+
+  /**
+   * 执行撤销操作。
+   */
+  const handleUndo = () => {
+    const currentIndex = historyIndexRef.current
+    if (currentIndex > 0) {
+      const newIndex = currentIndex - 1
+      historyIndexRef.current = newIndex
+      setContent(historyRef.current[newIndex])
+    }
+  }
+
+  /**
+   * 执行重做操作。
+   */
+  const handleRedo = () => {
+    const history = historyRef.current
+    const currentIndex = historyIndexRef.current
+    if (currentIndex < history.length - 1) {
+      const newIndex = currentIndex + 1
+      historyIndexRef.current = newIndex
+      setContent(history[newIndex])
+    }
+  }
+
+  /**
+   * 捕获键盘事件，启用 Cmd+Z / Cmd+Shift+Z。
+   */
+  const handleEditorKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!e.metaKey) return
+    if (e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      if (e.shiftKey) {
+        handleRedo()
+      } else {
+        handleUndo()
+      }
+    }
+  }
+
+  // 初始化历史记录
+  useEffect(() => {
+    resetHistory("")
+  }, [])
 
   // 自动调整 textarea 高度
   useEffect(() => {
@@ -434,7 +519,8 @@ export default function ArticleNewPage() {
             <Textarea
               ref={textareaRef}
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => handleContentChange(e.target.value)}
+              onKeyDown={handleEditorKeyDown}
               placeholder="请输入文章内容（支持Markdown和HTML）"
               className="font-mono text-sm w-full resize-none overflow-hidden min-h-[800px]"
             />
